@@ -1,0 +1,20 @@
+# vCluster (vind) preset: Calico-oriented demo configuration.
+#
+# Calico is installed manually after cluster creation via kubectl.
+# This preset disables Flannel so Calico can replace it.
+#
+# Create:
+#   vcluster create zero-to-cluster --namespace zero-to-cluster \
+#     -f providers/vind/vcluster-multi-node.yaml \
+#     -f providers/vind/cni/calico.yaml
+#   vcluster connect zero-to-cluster --namespace zero-to-cluster
+#   kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
+#
+# Or with the wrapper:
+#   ./scripts/create-cluster.sh vind --cni calico
+#   ./scripts/create-cluster.sh vind --multi-node --cni calico
+
+deploy:
+  cni:
+    flannel:
+      enabled: false

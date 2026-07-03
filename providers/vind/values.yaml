@@ -1,0 +1,39 @@
+# vcluster Helm values for the vind local virtual cluster demo (single-node).
+#
+# WARNING: The controller manager settings below are tuned for fast demo
+# failure detection. DO NOT use in production clusters.
+#
+# Note: --pod-eviction-timeout, --default-not-ready-toleration-seconds, and
+# --default-unreachable-toleration-seconds were removed in Kubernetes 1.32.
+# Fast eviction now relies on node-monitor-grace-period only; pods still use
+# the default 300s toleration.
+#
+# In production, fast node monitoring causes:
+#   - Unnecessary evictions during network blips
+#   - Data loss risk for stateful workloads
+#   - Cascading failures during node maintenance
+#
+# Usage:
+#   vcluster create <name> --namespace <namespace> -f providers/vind/values.yaml
+
+controlPlane:
+  distro:
+    k8s:
+      controllerManager:
+        extraArgs:
+          - --node-monitor-grace-period=10s
+          - --node-monitor-period=2s
+
+sync:
+  fromHost:
+    nodes:
+      enabled: true
+
+policies:
+  networkPolicy:
+    enabled: false
+  podSecurityStandard: ""
+  resourceQuota:
+    enabled: false
+  limitRange:
+    enabled: false

@@ -1,0 +1,549 @@
+# KCD Lima 2026 "From Zero to Cluster" Demo Application
+# A visitor counter web app that demonstrates:
+# - Multi-tier architecture (webapp + MySQL)
+# - Service discovery
+# - Persistent storage
+# - Pod scheduling across nodes
+# - Self-healing (reconciliation)
+#
+# __NAMESPACE__ is replaced by deploy-app.sh
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-secret
+  namespace: __NAMESPACE__
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: "kcd2026"
+  MYSQL_DATABASE: "kcd"
+  MYSQL_USER: "kcd"
+  MYSQL_PASSWORD: "kcd2026"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-initdb
+  namespace: __NAMESPACE__
+data:
+  init.sql: |
+    USE kcd;
+    CREATE TABLE IF NOT EXISTS visits (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      node_name VARCHAR(100),
+      pod_name VARCHAR(100),
+      user_agent TEXT
+    );
+    CREATE TABLE IF NOT EXISTS messages (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      author VARCHAR(100),
+      message TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO messages (author, message) VALUES
+      ('KCD Lima', 'Welcome to From Zero to Cluster!'),
+      ('Alice', 'Containers are running on multiple nodes!'),
+      ('Bob', 'Service discovery just worked!'),
+      ('Charlie', 'This pod healed itself after deletion!');
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: __NAMESPACE__
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: __NAMESPACE__
+  labels:
+    app: mysql
+    tier: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: mysql
+        tier: database
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: mysql-initdb
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-pvc
+        - name: mysql-initdb
+          configMap:
+            name: mysql-initdb
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: __NAMESPACE__
+spec:
+  selector:
+    app: mysql
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webapp-code
+  namespace: __NAMESPACE__
+data:
+  app.py: |
+    from flask import Flask, jsonify, render_template_string, request, make_response
+    import mysql.connector
+    import os
+    import socket
+
+    app = Flask(__name__)
+
+    DB_CONFIG = {
+        'host': os.environ.get('MYSQL_HOST', 'mysql'),
+        'port': int(os.environ.get('MYSQL_PORT', '3306')),
+        'user': os.environ.get('MYSQL_USER', 'kcd'),
+        'password': os.environ.get('MYSQL_PASSWORD', 'kcd2026'),
+        'database': os.environ.get('MYSQL_DATABASE', 'kcd'),
+    }
+
+    CLUSTER_NAME = os.environ.get('CLUSTER_NAME', 'unknown')
+    NODE_NAME = os.environ.get('NODE_NAME', 'unknown')
+    POD_NAME = os.environ.get('POD_NAME', 'unknown')
+
+    HTML_TEMPLATE = '''
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>KCD Lima 2026 - From Zero to Cluster</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+                background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+                color: #e0e0e0;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 2rem;
+            }
+            .container { max-width: 800px; width: 100%; }
+            h1 {
+                font-size: 2.5rem;
+                background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                margin-bottom: 0.5rem;
+            }
+            .subtitle { color: #888; font-size: 1.1rem; margin-bottom: 2rem; }
+            .card {
+                background: rgba(255,255,255,0.05);
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 12px;
+                padding: 1.5rem;
+                margin-bottom: 1rem;
+                backdrop-filter: blur(10px);
+            }
+            .card h2 { color: #00d2ff; margin-bottom: 1rem; font-size: 1.2rem; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+            .stat { text-align: center; }
+            .stat .value { font-size: 2.5rem; font-weight: bold; color: #00d2ff; }
+            .stat .label { color: #888; font-size: 0.9rem; margin-top: 0.25rem; }
+            .info-row { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+            .info-row:last-child { border-bottom: none; }
+            .info-label { color: #888; }
+            .info-value { color: #00d2ff; font-family: monospace; }
+            .btn {
+                display: inline-block;
+                padding: 0.75rem 1.5rem;
+                background: linear-gradient(90deg, #ff416c, #ff4b2b);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 1rem;
+                text-decoration: none;
+                margin-top: 1rem;
+                transition: transform 0.2s;
+            }
+            .btn:hover { transform: scale(1.05); }
+            .btn-demo { background: linear-gradient(90deg, #11998e, #38ef7d); }
+            table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+            th, td { padding: 0.5rem; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); }
+            th { color: #00d2ff; font-size: 0.85rem; text-transform: uppercase; }
+            td { font-size: 0.9rem; }
+            .badge {
+                display: inline-block;
+                padding: 0.25rem 0.5rem;
+                border-radius: 4px;
+                font-size: 0.75rem;
+                font-weight: bold;
+            }
+            .badge-primary { background: #3a7bd5; color: white; }
+            .badge-success { background: #38ef7d; color: #111; }
+            .footer { margin-top: 2rem; color: #555; font-size: 0.8rem; text-align: center; }
+            .pulse { animation: pulse 2s infinite; }
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>KCD Lima 2026</h1>
+            <p class="subtitle">From Zero to Cluster — Live Demo</p>
+
+            <div class="card">
+                <div class="grid">
+                    <div class="stat">
+                        <div class="value" id="visit-count">{{ visit_count }}</div>
+                        <div class="label">Total Visits</div>
+                    </div>
+                    <div class="stat">
+                        <div class="value">{{ node_name }}</div>
+                        <div class="label">Served by Node</div>
+                    </div>
+                    <div class="stat">
+                        <div class="value badge badge-success">Running</div>
+                        <div class="label">Pod Status</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Cluster Information</h2>
+                <div class="info-row">
+                    <span class="info-label">Cluster</span>
+                    <span class="info-value">{{ cluster_name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Node</span>
+                    <span class="info-value">{{ node_name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Pod</span>
+                    <span class="info-value">{{ pod_name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Hostname</span>
+                    <span class="info-value">{{ hostname }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Database</span>
+                    <span class="info-value badge badge-primary">Connected</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Recent Messages</h2>
+                <table>
+                    <tr><th>Author</th><th>Message</th><th>Time</th></tr>
+                    {% for msg in messages %}
+                    <tr>
+                        <td>{{ msg.author }}</td>
+                        <td>{{ msg.message }}</td>
+                        <td>{{ msg.created_at }}</td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+
+            <div class="card">
+                <h2>Demo Actions</h2>
+                <p style="color:#888; margin-bottom:1rem;">Click to demonstrate Kubernetes features:</p>
+                <button class="btn btn-demo" onclick="recordVisit()">+1 Visit (Counter Demo)</button>
+                <button class="btn" onclick="selfHeal()">Kill This Pod (Self-Healing Demo)</button>
+            </div>
+
+            <div class="footer">
+                KCD Lima 2026 — From Zero to Cluster — Kubernetes Demo App
+            </div>
+        </div>
+        <script>
+            function recordVisit() {
+                fetch('/api/visit', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        document.getElementById('visit-count').textContent = data.visits;
+                    });
+            }
+            function selfHeal() {
+                if (confirm('This will kill this pod. Kubernetes will automatically recreate it. Continue?')) {
+                    fetch('/api/self-heal', { method: 'POST' })
+                        .then(r => r.json())
+                        .then(data => {
+                            alert('Pod is exiting! Watch Kubernetes recreate it.');
+                        })
+                        .catch(() => {
+                            alert('Pod is exiting! Watch Kubernetes recreate it.');
+                        });
+                }
+            }
+        </script>
+    </body>
+    </html>
+    '''
+
+    def get_db():
+        return mysql.connector.connect(**DB_CONFIG)
+
+    def get_visit_count():
+        try:
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM visits")
+            count = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+            return count
+        except Exception:
+            return 0
+
+    def get_messages():
+        try:
+            conn = get_db()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT author, message, DATE_FORMAT(created_at, '%%H:%%i:%%s') as created_at FROM messages ORDER BY id DESC LIMIT 5")
+            messages = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return messages
+        except Exception:
+            return []
+
+    @app.route('/')
+    def index():
+        visit_count = get_visit_count()
+        messages = get_messages()
+        return render_template_string(
+            HTML_TEMPLATE,
+            visit_count=visit_count,
+            cluster_name=CLUSTER_NAME,
+            node_name=NODE_NAME,
+            pod_name=POD_NAME,
+            hostname=socket.gethostname(),
+            messages=messages
+        )
+
+    @app.route('/api/visits')
+    def api_visits():
+        count = get_visit_count()
+        return jsonify({
+            'visits': count,
+            'node': NODE_NAME,
+            'pod': POD_NAME,
+            'cluster': CLUSTER_NAME
+        })
+
+    @app.route('/api/visit', methods=['POST'])
+    def api_visit():
+        try:
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO visits (node_name, pod_name, user_agent) VALUES (%s, %s, %s)",
+                (NODE_NAME, POD_NAME, 'manual')
+            )
+            conn.commit()
+            cursor.execute("SELECT COUNT(*) FROM visits")
+            count = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+            return jsonify({'visits': count})
+        except Exception as e:
+            return jsonify({'visits': get_visit_count(), 'error': str(e)})
+
+    @app.route('/api/self-heal', methods=['POST'])
+    def api_self_heal():
+        import threading
+        def exit_soon():
+            import time
+            time.sleep(0.5)
+            os._exit(0)
+        threading.Thread(target=exit_soon).start()
+        return jsonify({'status': 'Pod is exiting. Kubernetes will recreate it.'}), 200
+
+    if __name__ == '__main__':
+        app.run(host='0.0.0.0', port=8080)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  namespace: __NAMESPACE__
+  labels:
+    app: webapp
+    tier: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+        tier: frontend
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: webapp
+          image: python:3.12-slim
+          command:
+            - bash
+            - -c
+            - |
+              pip install flask mysql-connector-python >/dev/null 2>&1
+              python /app/app.py
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MYSQL_HOST
+              value: mysql
+            - name: MYSQL_PORT
+              value: "3306"
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: MYSQL_DATABASE
+            - name: CLUSTER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          volumeMounts:
+            - name: code
+              mountPath: /app
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 45
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+      volumes:
+        - name: code
+          configMap:
+            name: webapp-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp
+  namespace: __NAMESPACE__
+spec:
+  selector:
+    app: webapp
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

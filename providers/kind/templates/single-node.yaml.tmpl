@@ -1,0 +1,36 @@
+# Single-node kind cluster configuration.
+#
+# WARNING: The controller manager settings below are tuned for fast demo
+# failure detection. DO NOT use in production clusters:
+#   - node-monitor-grace-period: 10s (production: 40s)
+#   - node-monitor-period: 2s (production: 5s)
+#
+# Note: The following flags were removed in Kubernetes 1.32 and can no longer
+# be tuned: --pod-eviction-timeout, --default-not-ready-toleration-seconds,
+# --default-unreachable-toleration-seconds. Fast eviction now relies on
+# node-monitor-grace-period only; pods still use the default 300s toleration.
+#
+# In production, fast node monitoring causes:
+#   - Unnecessary evictions during network blips
+#   - Data loss risk for stateful workloads
+#   - Cascading failures during node maintenance
+#
+# NETWORKING placeholder is replaced by create-cluster.sh
+apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.32.0
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        controllerManager:
+          extraArgs:
+            node-monitor-grace-period: "10s"
+            node-monitor-period: "2s"
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-status-update-frequency: "4s"
+__NETWORKING__

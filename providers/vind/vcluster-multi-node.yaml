@@ -1,0 +1,47 @@
+# Multi-node vCluster (vind) configuration (1 control-plane + 3 workers).
+#
+# WARNING: The controller manager settings below are tuned for fast demo
+# failure detection. DO NOT use in production clusters.
+#
+# Note: --pod-eviction-timeout, --default-not-ready-toleration-seconds, and
+# --default-unreachable-toleration-seconds were removed in Kubernetes 1.32.
+# Fast eviction now relies on node-monitor-grace-period only; pods still use
+# the default 300s toleration.
+#
+# In production, fast node monitoring causes:
+#   - Unnecessary evictions during network blips
+#   - Data loss risk for stateful workloads
+#   - Cascading failures during node maintenance
+#
+# Create:
+#   vcluster use driver docker
+#   vcluster create <name> --namespace <namespace> -f providers/vind/vcluster-multi-node.yaml
+#
+# Verify:
+#   kubectl get nodes -o wide
+#
+# Expected shape:
+#   <cluster-name>   Ready   control-plane
+#   worker-1         Ready   <none>
+#   worker-2         Ready   <none>
+#   worker-3         Ready   <none>
+
+controlPlane:
+  distro:
+    k8s:
+      controllerManager:
+        extraArgs:
+          - --node-monitor-grace-period=10s
+          - --node-monitor-period=2s
+
+sync:
+  fromHost:
+    nodes:
+      enabled: true
+
+experimental:
+  docker:
+    nodes:
+      - name: worker-1
+      - name: worker-2
+      - name: worker-3

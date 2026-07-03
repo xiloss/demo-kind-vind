@@ -1,0 +1,41 @@
+# vCluster (vind) preset: Cilium with kube-proxy replacement.
+#
+# Cilium replaces kube-proxy entirely, providing eBPF-based service routing.
+# This preset disables Flannel and installs Cilium with kube-proxy replacement
+# enabled after cluster creation via Helm.
+# Hubble is enabled for network observability with the UI available.
+#
+# IMPORTANT: k8sServiceHost must use the Kubernetes service ClusterIP (e.g., 10.96.0.1)
+# NOT the DNS name, because CoreDNS depends on Cilium and won't be running yet.
+#
+# After Cilium is ready, the kube-proxy DaemonSet is deleted since Cilium
+# handles all service routing via eBPF.
+#
+# Create:
+#   vcluster create zero-to-cluster --namespace zero-to-cluster \
+#     -f providers/vind/vcluster-multi-node.yaml \
+#     -f providers/vind/cni/cilium-kpr.yaml
+#   vcluster connect zero-to-cluster --namespace zero-to-cluster
+#   K8S_HOST=$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}')
+#   helm repo add cilium https://helm.cilium.io/
+#   helm install cilium cilium/cilium --namespace kube-system \
+#     --set kubeProxyReplacement=true \
+#     --set k8sServiceHost=$K8S_HOST \
+#     --set k8sServicePort=443 \
+#     --set hubble.enabled=true \
+#     --set hubble.relay.enabled=true \
+#     --set hubble.ui.enabled=true
+#   kubectl -n kube-system delete ds kube-proxy
+#
+# Or with the wrapper:
+#   ./scripts/create-cluster.sh vind --cni cilium-kpr
+#   ./scripts/create-cluster.sh vind --multi-node --cni cilium-kpr
+#
+# Access Hubble UI:
+#   kubectl port-forward -n kube-system svc/hubble-ui 12000:80
+#   Open http://localhost:12000
+
+deploy:
+  cni:
+    flannel:
+      enabled: false

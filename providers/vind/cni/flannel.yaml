@@ -1,0 +1,14 @@
+# vCluster (vind) preset: default CNI behavior.
+#
+# Flannel is the default for vind, so this file keeps the default behavior while
+# remaining explicit for scripted demo usage.
+#
+# Create:
+#   vcluster create zero-to-cluster --namespace zero-to-cluster \
+#     -f providers/vind/vcluster-multi-node.yaml \
+#     -f providers/vind/cni/flannel.yaml
+
+sync:
+  fromHost:
+    nodes:
+      enabled: true

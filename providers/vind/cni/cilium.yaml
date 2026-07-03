@@ -1,0 +1,29 @@
+# vCluster (vind) preset: Cilium-oriented demo configuration.
+#
+# Cilium is installed manually after cluster creation via Helm.
+# This preset disables Flannel so Cilium can replace it.
+# Hubble is enabled for network observability with the UI available.
+#
+# Create:
+#   vcluster create zero-to-cluster --namespace zero-to-cluster \
+#     -f providers/vind/vcluster-multi-node.yaml \
+#     -f providers/vind/cni/cilium.yaml
+#   vcluster connect zero-to-cluster --namespace zero-to-cluster
+#   helm repo add cilium https://helm.cilium.io/
+#   helm install cilium cilium/cilium --namespace kube-system \
+#     --set hubble.enabled=true \
+#     --set hubble.relay.enabled=true \
+#     --set hubble.ui.enabled=true
+#
+# Or with the wrapper:
+#   ./scripts/create-cluster.sh vind --cni cilium
+#   ./scripts/create-cluster.sh vind --multi-node --cni cilium
+#
+# Access Hubble UI:
+#   kubectl port-forward -n kube-system svc/hubble-ui 12000:80
+#   Open http://localhost:12000
+
+deploy:
+  cni:
+    flannel:
+      enabled: false

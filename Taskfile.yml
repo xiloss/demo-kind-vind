@@ -1,0 +1,112 @@
+version: "3"
+
+vars:
+  PROVIDER: '{{.PROVIDER | default "kind"}}'
+
+tasks:
+  default:
+    desc: Show help
+    cmds:
+      - task: help
+
+  help:
+    desc: Show commands and setup instructions
+    silent: true
+    cmds:
+      - |
+        printf 'From Zero to Cluster — demo automation\n\n'
+        printf '\033[1m==> Commands\033[0m\n\n'
+        printf 'Usage: task [target] [PROVIDER=kind|vind]\n\n'
+        printf 'Targets:\n'
+        task --list
+        printf '\nProvider and create options:\n'
+        printf '  task create PROVIDER=kind\n'
+        printf '  task create PROVIDER=kind CNI=cilium\n'
+        printf '\nCreate script help: ./scripts/create-cluster.sh --help\n'
+        printf '\nProvider (default: kind):\n'
+        printf '  kind            kind in Docker (multi-node)\n'
+        printf '  vind           vind / vcluster (preferred)\n'
+        printf '\n\033[1m==> Prerequisites\033[0m\n\n'
+        printf '\033[33mDocker\033[0m\n'
+        printf '  Linux:     sudo apt install docker.io        # Debian/Ubuntu\n'
+        printf '             sudo dnf install docker            # Fedora\n'
+        printf '             sudo pacman -S docker              # Arch\n'
+        printf '  macOS:     brew install --cask docker          # Docker Desktop\n'
+        printf '  Windows:   winget install Docker.DockerDesktop\n'
+        printf '  Docs:      https://docs.docker.com/engine/install/\n\n'
+        printf '\033[33mkubectl\033[0m\n'
+        printf '  Linux:     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"\n'
+        printf '             sudo install -m 0755 kubectl /usr/local/bin/kubectl\n'
+        printf '  macOS:     brew install kubernetes-cli\n'
+        printf '  Windows:   winget install Kubernetes.kubectl\n'
+        printf '  Docs:      https://kubernetes.io/docs/tasks/tools/\n\n'
+        printf '\033[33mkind (for kind provider)\033[0m\n'
+        printf '  Linux:     curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.32.0/kind-linux-amd64\n'
+        printf '             chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind\n'
+        printf '  macOS:     brew install kind\n'
+        printf '  Windows:   winget install Kubernetes.kind\n'
+        printf '  Docs:      https://kind.sigs.k8s.io/docs/user/quick-start/#installation (alt methods: go, package managers)\n\n'
+        printf '\033[33mvcluster / vind (for vind provider)\033[0m\n'
+        printf '  vind = vCluster CLI (v0.34+) with Docker driver. No separate binary.\n'
+        printf '  Linux:     curl -sSL https://github.com/loft-sh/vcluster/releases/latest/download/vcluster-linux-amd64 -o /tmp/vcluster\n'
+        printf '             sudo install -m 0755 /tmp/vcluster /usr/local/bin/vcluster\n'
+        printf '  macOS:     brew install vcluster\n'
+        printf '  Windows:   winget install LoftLabs.vcluster\n'
+        printf '  After install: vcluster use driver docker\n'
+        printf '  Docs:      https://github.com/loft-sh/vind\n\n'
+        printf '\033[1m==> Task runner alternatives\033[0m\n\n'
+        printf 'This project supports both make and Task (https://taskfile.dev):\n\n'
+        printf '\033[33mInstall make\033[0m (most systems already have it):\n'
+        printf '  Linux:     sudo apt install make         # Debian/Ubuntu\n'
+        printf '             sudo dnf install make         # Fedora\n'
+        printf '             sudo pacman -S make           # Arch\n'
+        printf '  macOS:     xcode-select --install        # Xcode CLI tools\n'
+        printf '             brew install make             # or Homebrew\n'
+        printf '  Windows:   winget install GnuWin32.Make\n'
+        printf '             choco install make\n\n'
+        printf '\033[33mInstall Task\033[0m:\n'
+        printf '  Linux:     sh -c "$(curl -fsSL https://taskfile.dev/install.sh)" -- -d -b ~/.local/bin\n'
+        printf '  macOS:     brew install go-task\n'
+        printf '  Windows:   winget install Task.Task\n'
+        printf '             choco install go-task\n'
+        printf '  Docs:      https://taskfile.dev/installation/\n\n'
+
+  install:
+    desc: Show commands and setup instructions (alias to help)
+    deps:
+      - help
+
+  check:
+    desc: Validate the local environment
+    cmds:
+      - ./scripts/check-environment.sh
+
+  create:
+    desc: Create the local cluster (PROVIDER=kind by default)
+    deps:
+      - check
+    cmds:
+      - ./scripts/create-cluster.sh {{.PROVIDER}}
+
+  deploy:
+    desc: Deploy the demo app to the cluster
+    cmds:
+      - ./scripts/deploy-app.sh
+
+  demo:
+    desc: Run the guided demo flow
+    cmds:
+      - ./scripts/demo-flow.sh
+
+  cleanup:
+    desc: Clean up the cluster or namespace (PROVIDER=kind by default)
+    cmds:
+      - ./scripts/cleanup.sh {{.PROVIDER}}
+
+  all:
+    desc: Run the full workflow (check → create → deploy → demo)
+    cmds:
+      - task: check
+      - task: create
+      - task: deploy
+      - task: demo

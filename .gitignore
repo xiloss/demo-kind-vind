@@ -1,0 +1,9 @@
+.DS_Store
+*.log
+.env
+.kube/
+kubeconfig.yaml
+manifests/app.yaml
+manifests/namespace.yaml
+docs/demo-flow.md
+docs/publishing-notes.md
